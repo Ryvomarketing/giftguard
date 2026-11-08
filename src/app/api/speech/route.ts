@@ -8,7 +8,8 @@ export async function POST(req: NextRequest) {
   try {
     guard(req, true);
     rateLimit(req, 'speech', 40);
-    const input = await body(req) as { text?: unknown };
+    const input = await body(req) as { text?: unknown; language?: unknown };
+    const spanish = input.language === 'es';
     const text = typeof input.text === 'string' ? input.text.trim() : '';
     if (!text || text.length > 600) throw new HttpError(400, 'Narration must be between 1 and 600 characters.');
     if (!process.env.OPENAI_API_KEY) throw new HttpError(503, 'Spoken narration needs the server API key. The tour continues with captions.');
@@ -20,7 +21,11 @@ export async function POST(req: NextRequest) {
         voice: process.env.OPENAI_REALTIME_VOICE || 'marin',
         input: text,
         response_format: 'mp3',
-        instructions: 'You are a warm, unhurried guide showing a nonprofit staff member around their donor workspace. Friendly and clear, never salesy.',
+        // A touch quicker than the model's default keeps the tour near a minute without sounding rushed.
+        speed: Math.min(1.5, Math.max(0.8, Number(process.env.OPENAI_TTS_SPEED) || 1.2)),
+        instructions: spanish
+          ? 'Eres una guía cálida y cercana que le muestra a una colega su espacio de trabajo de donantes. Habla en español colombiano, con acento natural de Colombia, en tono casual y amable, como una compañera de trabajo, con ritmo ágil pero sin afán. Nunca suenes a vendedora.'
+          : 'You are a warm, confident guide showing a nonprofit staff member around their donor workspace. Keep a brisk, lively pace without ever sounding rushed. Friendly and clear, never salesy.',
       }),
       signal: AbortSignal.any([req.signal, AbortSignal.timeout(20_000)]),
     });

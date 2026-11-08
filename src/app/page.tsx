@@ -6,7 +6,7 @@ import { Assistant, type VoiceControls } from '@/components/assistant';
 import { AgentSpotlight } from '@/components/agent-spotlight';
 import { CountUp } from '@/components/count-up';
 import { GiftTimeline } from '@/components/gift-timeline';
-import { Tour } from '@/components/tour';
+import { prefetchNarration, Tour } from '@/components/tour';
 import { SearchReveal } from '@/components/search-reveal';
 import { EventsPanel } from '@/components/events-panel';
 import { impactSummary, tourSteps, type TourLanguage, type TourStep } from '@/lib/showcase';
@@ -269,6 +269,8 @@ export default function Home() {
     setTour({ steps: tourSteps({ ...data, sourceCount: journey.sourceCount }, language), language });
   }
   function endTour() { setTour(null); setAgentActivity(null); }
+  /** Hovering or focusing a tour button fetches its first line, so the tour speaks as soon as it is clicked. */
+  function warmTour(language: TourLanguage) { if (data && !tourActive) prefetchNarration(tourSteps({ ...data, sourceCount: journey.sourceCount }, language)[0].say, language); }
   const missingSources = journey.missingSources;
   /** Shows an upload back as a table. Read-only: it never changes what was imported. */
   async function openFile(source: Source, name?: string) {
@@ -353,8 +355,8 @@ export default function Home() {
                 <strong><CountUp value={impact.duplicateGroups} format={count => count.toLocaleString()} replayKey={agentLanded === 'home' ? 'landed' : null} /></strong> {impact.duplicateGroups === 1 ? 'donor' : 'donors'} counted twice
               </> : <>Nothing at risk this week, and every donor is counted once.</>}</p>
               <div className="tour-buttons">
-                <Button variant="outline" size="sm" className="tour-button" onClick={() => startTour('en')} disabled={tourActive} aria-label="Show me around: a one-minute spoken tour"><Play size={13} />{tourActive ? 'Tour running…' : 'Show me around'}<span className="tour-length">1 min</span></Button>
-                <Button variant="ghost" size="sm" className="tour-button-alt" lang="es" onClick={() => startTour('es')} disabled={tourActive} aria-label="Recorrido en español: un minuto, hablado">En español</Button>
+                <Button variant="outline" size="sm" className="tour-button" onMouseEnter={() => warmTour('en')} onFocus={() => warmTour('en')} onClick={() => startTour('en')} disabled={tourActive} aria-label="Show me around: a one-minute spoken tour"><Play size={13} />{tourActive ? 'Tour running…' : 'Show me around'}<span className="tour-length">1 min</span></Button>
+                <Button variant="ghost" size="sm" className="tour-button-alt" lang="es" onMouseEnter={() => warmTour('es')} onFocus={() => warmTour('es')} onClick={() => startTour('es')} disabled={tourActive} aria-label="Recorrido en español: un minuto, hablado">En español</Button>
               </div>
             </div>}
             {view === 'home' && <p className="overview-line" data-agent-target="overview-summary" aria-label="Workspace summary">
@@ -481,7 +483,7 @@ export default function Home() {
           <footer className="workspace-footer"><span>GiftGuard / Tidepath</span><HelpTip label="data privacy">Donor records stay in this app’s database. When live AI is enabled, selected fields and voice requests are sent to OpenAI. Nothing is sent to donors automatically.</HelpTip>{undoAction && <Button variant="ghost" size="sm" disabled={busy} onClick={() => void propose(undoAction)}><Undo2 size={14} />Undo last change</Button>}{data.demo && <Button variant="ghost" size="sm" disabled={busy} onClick={() => void propose({ type: 'reset' })}>Reset demo</Button>}</footer>
         </main>
         <AgentSpotlight activity={agentActivity} enabled={showAgentActivity && (liveVoiceActive || tourActive)} />
-        {tour && <Tour steps={tour.steps} language={tour.language} onNavigate={view => navigate(view, true)} onActivity={setAgentActivity} onEnd={endTour} />}
+        {tour && <Tour steps={tour.steps} language={tour.language} onNavigate={view => navigate(view, true)} onSelectEvent={setSelectedEvent} onActivity={setAgentActivity} onEnd={endTour} />}
         <Assistant onActivity={setAgentActivity} showActivity={showAgentActivity} onShowActivityChange={setShowAgentActivity} voiceControlRef={voiceControls} onLiveChange={setLiveVoiceActive} onResult={onAssistantResult} aiAvailable={data.aiAvailable} suspended={!!approval || !!selectedDonor} approvalPending={!!approval} contextDonorId={selectedDonor || (view === 'calls' ? call?.donorId : undefined)} />
       </div>
 

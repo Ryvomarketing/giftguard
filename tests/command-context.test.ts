@@ -21,7 +21,7 @@ function donor(id: string, name: string): Donor {
   return { id, name, email: 'private@example.test', phone: '3055550100', address: 'Private address', language: 'en', records: [], gifts: [] };
 }
 function snapshot(): Snapshot {
-  return { donors: [donor('rosa', 'Rosa Delgado'), donor('maria1', 'María Cruz'), donor('maria2', 'Maria Perez')], matches: [], flags: [], outreach: [], merges: [], sources: [], today: '2026-11-07', demo: true, aiAvailable: false, giftCount: 0, totalCents: 0 };
+  return { donors: [donor('rosa', 'Rosa Delgado'), donor('maria1', 'María Cruz'), donor('maria2', 'Maria Perez')], matches: [], flags: [], outreach: [], merges: [], sources: [], events: [], today: '2026-11-07', demo: true, aiAvailable: false, giftCount: 0, totalCents: 0 };
 }
 function request(body: unknown): NextRequest {
   return new NextRequest('http://localhost:3000/api/command', { method: 'POST', headers: { origin: 'http://localhost:3000', cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });

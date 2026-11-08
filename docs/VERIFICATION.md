@@ -96,3 +96,68 @@ Copied the project without `node_modules`, `.next`, `data/` or `.env.local` into
 - `npm ci` first failed with `EINTEGRITY` on `@types/papaparse@5.5.2`: the lockfile carried a checksum that did not match the registry. Replaced it with the registry's published integrity value (one line in `package-lock.json`). No other entry failed.
 - After the fix: `npm ci` succeeds, `npm test` passes 152, `npm run build` compiles, `npm start` serves the app, the sample password signs in, the state route returns 307 donors and 899 gifts, and the new file view returns 244 rows. No environment file was present: demo mode, the sample password, the database and the session secret all came from defaults. Without an OpenAI key the app reports `aiAvailable: false` and uses sample mode, as designed.
 - `npm audit` lists advisories in Next, sharp, postcss and minimatch. None are app code; they are dependency-tree notices that would be addressed by a future `next` upgrade.
+
+## Landed-tab highlight (2026-11-08)
+
+Request: when the assistant navigates, the top tab it opened should be visibly highlighted, not only underlined.
+
+- `page.tsx` tracks `agentLanded` (the view the assistant just opened) for 3.6 seconds whenever navigation comes from the assistant, including ranked-donor results. Manual clicks clear it. The matching nav button and the page heading carry `data-agent-landed`.
+- CSS: the tab fills as a black pill with white text and an inverted count badge for about 1.5 s, fades out, and the underline sweeps in from the left; the heading slides up. All of it is CSS keyframes and is disabled by the existing reduced-motion rule.
+- Verified on the production build by sending "Show me the calls this week page", "Show me all donors" and "Open the duplicates page" through the typed assistant: the attribute appeared about 1.5 s after send (the command round trip) and computed styles read white text and a fully opaque pill at +450 ms. A frozen mid-animation frame was screenshotted for the visual check.
+- Suite: 152 passing; typecheck and lint unchanged.
+
+## Impact line, guided tour, giving timelines (2026-11-08)
+
+Built from the three "wow" recommendations the user approved.
+
+- `src/lib/showcase.ts`: `impactSummary` (open follow-ups' annual value, pending duplicate groups), `timelineMonths` (24 months, expected-but-missing month marked only when empty), `tourSteps` (five steps, English and Spanish, told with real numbers). Tests in `tests/showcase.test.ts`.
+- `src/components/count-up.tsx`, `gift-timeline.tsx`, `tour.tsx`; `POST /api/speech` (OpenAI TTS, `gpt-4o-mini-tts`, voice from `OPENAI_REALTIME_VOICE`, 600-char cap, same-origin + sign-in + rate limit, nothing stored).
+- Tour mechanics: script fixed in state when the tour starts (a first build recomputed it each render and restarted the tour every frame, which also flooded `/api/speech` and tripped the per-session limit, producing the browser fallback voice the user heard as "robotic"). Clips are now fetched one step ahead, with one retry, and the fallback is labelled in the caption. Manual navigation or Escape stops the tour; starting it ends a live voice session first.
+- Verified on the production build: English tour visited Start → Duplicates → Calls → All donors → Start in ~60 s with the spotlight on the impact line, match records, follow-up detail, donor list and the voice launcher; Spanish tour starts with "Hola, soy GiftGuard…" and `/api/speech` returned 200 audio/mpeg for its clips. Impact line reads "$6,270 in regular giving at risk · 6 donors counted twice" on the sample data.
+- Suite: 155 passing; typecheck and lint clean apart from the pre-existing warning.
+
+## Quieter guidance text (2026-11-08)
+
+User feedback on screenshots: helper sentences under the step headings looked like clutter, and the timeline caption needed to read as a note.
+
+- Calls this week: the "check your latest files" sentence, the step-2 "use the note below…" sentence and the step-3 "choose an outcome…" sentence are now info tooltips (the existing HelpTip pattern) beside the toolbar and each step heading. The search box is an icon that expands into a 260px field on click, focuses, and collapses on Escape or blur when empty. Phone and email are now spaced and underlined as links.
+- Duplicates: the reason line under "Are these the same person?" moved into the heading's tooltip as "Why these matched: …" together with the confidence caveat.
+- Donor record: the timeline caption is a labelled Note block (left rule, muted background) and now says it reflects uploaded files.
+- Verified in the browser on the production build; suite still passes.
+
+## Answer bar and the "received" view (2026-11-08)
+
+User report: asking the voice agent "who has paid their donations" gave a good spoken answer but the screen jumped to Calls this week, because every fact lookup opens a page and there was no view for recent gifts, so the model used the late list.
+
+- `src/lib/answers.ts`: `receivedWindow` turns period words into a dated window (default the current month; last 30 days, this week, last month, this year, since the last upload); `receivedDonors` lists donors with donations in the window, newest gift first, purchases excluded; `receivedAnswer` gives the label, count and total.
+- Voice tool: `get_donor_context` gains view `received` (period words in `query`), with instructions that "who has NOT paid" stays on `late`. Typed assistant: new `received` intent with a `period` field, offline phrases ("who has paid", "what came in since the last upload", "which donors have given in the last 30 days"); "not paid / haven't given" now routes to `late`.
+- Every list answer (received, top donors, gala) carries `answer: { label, count, totalCents }`. The All donors page shows it as a black answer bar above the filtered list ("Gave in the last 30 days · 41 donors · $3,120 · Show everyone"); the spotlight lands on the bar, then the list.
+- Tests: `tests/answers.test.ts` (window parsing, ordering and purchase exclusion, typed intents including "who has not paid" → late and "who has given the most" → top, voice tool output without contact details, activity targets). Suite: 159 passing.
+
+## One search control everywhere (2026-11-08)
+
+User request: every search area should be the magnifier icon that opens into a field, not a standing box.
+
+- `src/components/search-reveal.tsx`: shared control (icon → 260px field with focus; Escape or clicking the icon clears and folds it; it also folds on blur when empty; a non-empty value keeps it open). Used on Calls this week, All donors and the uploaded-file table dialog; the one-off calls implementation was removed.
+- Verified in the browser: collapsed width 2px, open width 260px, focus lands in the field, filtering works on each page (All donors "Rosa" → 3 donors; file table "Carmen" → 4 of 244 rows). Suite: 159 passing.
+
+## Event sign-up lists (2026-11-08)
+
+Request: event sign-up as original data capture, controllable from the voice agent with the same visuals ("I have a new gala coming up for the Miami Foundation on November 21, make me a sign-up list"), then shown with what a guest sees.
+
+- `src/lib/events.ts`: `signup_events` and `signups` tables (created on demand, cleared by reset); `createEvent`/`deleteEvent` (only empty lists), `listEvents`, `publicEvent` (code, name, host, date only), `validateSignupInput`, `matchSignup` (email → phone → exact name(+ZIP) → last name+ZIP; prefers the duplicate whose name also matches), `addSignup` (cap 2,000 per event), `parseEventRequest`/`parseSpokenDate` (month-day, day-month, numeric, ISO; a date without a year is the next occurrence).
+- Routes: `GET/POST/DELETE /api/events` (staff; `?qr=code` renders a PNG QR with the `qrcode` package, no external service); `POST /api/signup` (public, same-origin, per-address rate limit, returns only `{ ok, name, event }`); page `/signup/[code]` (server-rendered guest form, bilingual, noindex).
+- UI: Events tab; `EventsPanel` with create form, event cards (guests, already-donors, pledged), detail with share link + Copy + Open, QR, guest table with match badges, two-step Remove for empty lists, and a phone-frame preview of the live guest form (`SignupForm preview`).
+- Assistant: typed intent `event` (offline parser + Command agent fields `eventName`, `eventHost`, `eventDate`); voice tool `create_event`; `open_page` and `get_donor_context` know `events`; activity targets `nav-events` → `event-preview`/`event-detail`. Creation is direct (no approval card) because it adds an empty list only and is reversible; sign-ups are never deleted silently.
+- Demo seed: "Fall Harvest Gala" (2026-10-20) with five guests, three matched to donors.
+- Tests: `tests/events.test.ts` (date parsing, sentence parsing, create/match/validate/remove, demo seed, typed and voice creation, public route security, staff routes and QR). Suite: 164 passing; typecheck and lint clean.
+- Browser check on the production build: typed "I have a new gala coming up for the Miami Foundation on November 21 can you make me a sign up list for that" → Events tab opened, "Miami Foundation Gala · Sat, Nov 21, 2026 · created by the assistant" selected, share link `/signup/c976ee7n`, QR rendered, phone preview showing the live guest form. Opened the guest page in a separate isolated browser context, signed up "Carmen Vega" with phone 202-555-0002, ZIP 33130, pledge $150 → "You're on the list"; the guest page never shows match data. The staff page then listed her with "Likely Carmen Vega · Same phone · High" and "$150 pledged".
+- Two fixes found during that check: the staff guest table reused the guest form's `signup-row` class (renamed to `guest-row`), and the Events page did not refetch on a tab change; it now refreshes on open and every 8 s while visible, so a check-in table sees new guests arrive.
+
+## Voice creation now gets the spotlight (2026-11-08)
+
+User report: creating an event by voice highlighted the Events tab but the new list never got the agent's outline.
+
+- Cause: the voice client publishes the "complete" activity as soon as the tool result arrives, but the event detail and guest preview render only after the page refetches its data (about 1.5 s). The spotlight started its fade timer at "complete", so it expired before the target existed; and when it did find the target, the detail sat below the fold, so only a sliver was outlined.
+- Fixes: `AgentSpotlight` now starts the fade/hide timers only after a finished step's target has actually been found (the 8 s search window still bounds a missing target). `EventsPanel` scrolls the selected list into view (120 px scroll margin under the sticky header) whether it was opened by a click or by the assistant.
+- Verified with a real Realtime session (silent stubbed microphone, request injected as a text item over the data channel): "I have a new holiday dinner coming up for the Children's Trust on December 12, can you make me a sign up list for that?" → the model called `create_event`, the Events tab lit up, "Children's Trust Holiday Dinner · Sat, Dec 12, 2026 · created by the assistant" opened, and the spotlight label "Your sign-up page is ready" pointed at the guest preview.

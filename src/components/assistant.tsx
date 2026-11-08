@@ -121,7 +121,7 @@ export function Assistant({ onResult, aiAvailable, suspended = false, approvalPe
         <span aria-hidden="true" className="h-6 w-px bg-white/25"/>
         <Button size="icon" className="size-12 rounded-none bg-black text-white hover:bg-neutral-800" onClick={() => { endVoice(); setOpen(false); }} aria-label="End live voice conversation"><PhoneOff className="size-4"/></Button>
       </> : active ? <Button ref={launcher} className="h-12 gap-2 rounded-none bg-black px-5 text-white hover:bg-neutral-800" onClick={() => { endVoice(); setOpen(false); }} aria-label="End live voice conversation"><PhoneOff className="size-4"/>{approvalPending ? 'Voice paused · End' : 'Live voice · End'}</Button> : <>
-        <Button ref={launcher} className="h-12 gap-2 rounded-none bg-black px-5 text-white hover:bg-neutral-800" onClick={() => void startVoice()} disabled={suspended} aria-label="Start live voice conversation"><Mic className="size-4" strokeWidth={1.5}/>Talk to GiftGuard</Button>
+        <Button ref={launcher} data-agent-target="voice-launcher" className="h-12 gap-2 rounded-none bg-black px-5 text-white hover:bg-neutral-800" onClick={() => void startVoice()} disabled={suspended} aria-label="Start live voice conversation"><Mic className="size-4" strokeWidth={1.5}/>Talk to GiftGuard</Button>
         <span aria-hidden="true" className="h-6 w-px bg-white/25"/>
         <Button size="icon" className="size-12 rounded-none bg-black text-white hover:bg-neutral-800" onClick={openText} disabled={suspended} aria-label="Type to GiftGuard"><Keyboard className="size-4" strokeWidth={1.5}/></Button>
       </>}

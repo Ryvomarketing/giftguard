@@ -166,6 +166,11 @@ export function AgentSpotlight({ activity, enabled }: { activity: AgentActivity 
       if (target) {
         if (missingTimer) clearTimeout(missingTimer);
         missingTimer = null;
+        // A finished step fades only after its target has actually appeared, so a panel that renders a moment later still gets pointed at.
+        if ((phase === 'complete' || phase === 'failed' || phase === 'saved') && !fadeTimer) {
+          fadeTimer = setTimeout(() => setFadingKey(key!), FADE_AFTER_MS);
+          hideTimer = setTimeout(() => { setExpiredKey(key!); stop(); }, HIDE_AFTER_MS);
+        }
       } else if (!missingTimer) {
         // Missing targets never keep scanning the page indefinitely.
         missingTimer = setTimeout(stop, SEARCH_WINDOW_MS);
@@ -177,10 +182,6 @@ export function AgentSpotlight({ activity, enabled }: { activity: AgentActivity 
     window.addEventListener('scroll', schedule, true);
     viewport?.addEventListener('resize', schedule);
     viewport?.addEventListener('scroll', schedule);
-    if (phase === 'complete' || phase === 'failed' || phase === 'saved') {
-      fadeTimer = setTimeout(() => setFadingKey(key), FADE_AFTER_MS);
-      hideTimer = setTimeout(() => { setExpiredKey(key); stop(); }, HIDE_AFTER_MS);
-    }
     schedule();
     return stop;
   }, [enabled, key, phase, targetNames]);

@@ -52,17 +52,20 @@ test('the timeline covers the last 24 months, sums gifts by month, and marks onl
 test('the tour is told with the workspace numbers, visits every page, and changes nothing', () => {
   const data = snapshot();
   const steps = tourSteps({ ...data, sourceCount: 4 });
-  assert.deepEqual(steps.map(step => step.view), ['home', 'matches', 'calls', 'donors', 'home']);
-  assert.match(steps[0].say, /899 transactions/); assert.match(steps[0].say, /\$[\d,]+ in regular giving at risk/); assert.match(steps[0].say, /6 donors who appear more than once/);
+  assert.deepEqual(steps.map(step => step.view), ['home', 'matches', 'calls', 'donors', 'events', 'home']);
+  assert.match(steps[0].say, /899 transactions/); assert.match(steps[0].say, /over \$6,000 in regular giving at risk/); assert.doesNotMatch(steps[0].say, /6,270/); assert.match(steps[0].say, /6 donors who appear more than once/);
   assert.match(steps[2].say, /days late/);
   assert.match(steps[3].say, new RegExp(`${data.donors.length} donors`));
+  assert.match(steps[4].say, /Fall Harvest Gala/); assert.match(steps[4].say, /5 guests signed up/); assert.match(steps[4].say, /already known donors/); assert.equal(steps[4].eventId, data.events[0].id); assert.deepEqual(steps[4].targets, ['event-preview', 'event-detail', 'event-list']);
+  const noEvents = tourSteps({ ...data, events: [], sourceCount: 4 });
+  assert.match(noEvents[4].say, /make me a sign-up list/); assert.equal(noEvents[4].eventId, undefined); assert.ok(noEvents[4].targets.includes('nav-events'));
   assert.ok(steps.every(step => step.say.length < 400 && step.targets.length > 0 && !step.say.includes('@')));
   const quiet = tourSteps({ ...data, flags: [], matches: [], sourceCount: 4 });
   assert.match(quiet[0].say, /Nothing is at risk/); assert.doesNotMatch(quiet[2].say, /late/);
   assert.equal(JSON.stringify(snapshot().flags), JSON.stringify(data.flags));
   const spanish = tourSteps({ ...data, sourceCount: 4 }, 'es');
   assert.deepEqual(spanish.map(step => step.view), steps.map(step => step.view));
-  assert.match(spanish[0].say, /^Hola, soy GiftGuard/); assert.match(spanish[0].say, /899 transacciones/); assert.match(spanish[2].say, /días de retraso/);
+  assert.match(spanish[0].say, /^¡Qué más! Bienvenidos a GiftGuard\./); assert.match(spanish[4].say, /se anotaron desde el celular/); assert.match(spanish[1].say, /Tranquilo/); assert.match(steps[0].say, /^Welcome to GiftGuard!/); assert.match(spanish[0].say, /899 transacciones/); assert.match(spanish[0].say, /más de \$6,000/); assert.match(spanish[2].say, /días de retraso/); assert.match(spanish[4].say, /Fall Harvest Gala/); assert.equal(spanish[4].eventId, steps[4].eventId);
   assert.ok(spanish.every((step, index) => step.say !== steps[index].say && step.targets.join() === steps[index].targets.join()));
 });
 

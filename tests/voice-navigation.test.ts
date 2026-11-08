@@ -107,4 +107,15 @@ test('the ranking can be limited to one year, and this year / last year resolve 
   assert.match(none.message, /1999/); assert.equal(none.donorIds, undefined);
 });
 
+test('a lookup still works when the model wraps the query in an object or sends the year as text', async () => {
+  const data = snapshot();
+  const wrapped = await runRealtimeTool({ name: 'get_donor_context', arguments: { view: 'top', year: null, query: { question: 'Who is our best donor?' } } }, data);
+  assert.equal(wrapped.result?.view, 'donors'); assert.ok((wrapped.result?.donorIds?.length ?? 0) > 0); assert.equal(wrapped.result?.answer?.label, 'Top donors by donations');
+  const textYear = await runRealtimeTool({ name: 'get_donor_context', arguments: { view: 'top', query: null, year: String(Number(data.today.slice(0, 4))) } }, data);
+  assert.equal(textYear.output.year, Number(data.today.slice(0, 4)));
+  const named = await runRealtimeTool({ name: 'get_donor_context', arguments: { view: 'donor', query: { name: 'Rosa Delgado' } } }, data);
+  assert.ok(JSON.stringify(named.output).includes('Delgado'));
+  await assert.rejects(runRealtimeTool({ name: 'get_donor_context', arguments: { view: 'top', query: 'x'.repeat(300) } }, data), (error: unknown) => error instanceof HttpError && error.status === 400);
+});
+
 test.after(() => rmSync(directory, { recursive: true, force: true }));

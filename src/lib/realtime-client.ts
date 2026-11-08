@@ -38,6 +38,7 @@ type ServerEvent = {
 
 const connectionFailure = 'Live voice could not connect. Please check your connection and server setup.';
 class ConnectionError extends Error {}
+class ToolRequestError extends Error { constructor(message: string, public status: number) { super(message); } }
 class SignedOutError extends Error {}
 const signedOutMessage = 'Your GiftGuard sign-in has expired, usually because the server restarted. Refresh the page, sign in again, then reconnect live voice.';
 
@@ -368,7 +369,11 @@ export class LiveVoiceSession {
           });
           if (!this.current(epoch)) return;
           if (response.status === 401) throw new SignedOutError();
-          if (!response.ok) throw new Error('Tool request failed.');
+          if (!response.ok) {
+            // The server explains what to fix (an ID instead of a name, a missing date); the model gets that text so it can correct itself.
+            const detail = await response.json().catch(() => null) as { error?: unknown } | null;
+            throw new ToolRequestError(typeof detail?.error === 'string' ? detail.error : 'Tool request failed.', response.status);
+          }
           const payload = await response.json() as { result?: CommandResult; output?: unknown };
           if (!this.current(epoch)) return;
           // Preserve the server's model-safe output even when no UI result was produced.
@@ -400,7 +405,7 @@ export class LiveVoiceSession {
           if (!this.current(epoch)) return;
           const signedOut = error instanceof SignedOutError;
           if (signedOut && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('giftguard:signed-out'));
-          output ??= { error: signedOut ? 'The staff member is signed out of GiftGuard, so no records could be read. Ask them to refresh the page, sign in again and reconnect live voice.' : 'That request could not be completed. Ask the user to try again.' };
+          output ??= { error: signedOut ? 'The staff member is signed out of GiftGuard, so no records could be read. Ask them to refresh the page, sign in again and reconnect live voice.' : error instanceof ToolRequestError && error.status < 500 ? error.message : 'That request could not be completed. Ask the user to try again.' };
           if (args && this.ownsActivity(activityVersion, epoch, turn)) {
             const failed = toolActivity(activityId, call.name, args, 'failed');
             if (failed) this.publishActivity(failed);

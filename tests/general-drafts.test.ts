@@ -54,7 +54,9 @@ test('the voice tool drafts for a described group when no donor is chosen, and r
   assert.match(result.result?.note ?? '', /^Subject: /);
   assert.equal(result.output.audience, 'our monthly supporters'); assert.equal(result.output.sent, false); assert.equal(result.output.drafting, 'template');
   await assert.rejects(runRealtimeTool({ name: 'draft_note', arguments: { donorId: null, audience: null, language: 'en', giveMiami: false, format: 'note', purpose: '' } }, data), (error: unknown) => error instanceof HttpError && error.status === 400);
-  await assert.rejects(runRealtimeTool({ name: 'draft_note', arguments: { donorId: data.donors[0].id, audience: 'everyone', language: 'en', giveMiami: false, format: 'note', purpose: '' } }, data), (error: unknown) => error instanceof HttpError && error.status === 400);
+  const both = await runRealtimeTool({ name: 'draft_note', arguments: { donorId: data.donors[0].id, audience: 'everyone', language: 'en', giveMiami: false, format: 'note', purpose: '' } }, data);
+  assert.equal(both.result?.donorId, data.donors[0].id, 'when both are given the named donor wins and no group message is produced');
+  assert.equal(both.output.individualsNamed, undefined);
   const session = realtimeSession();
   const tool = session.tools.find(item => item.name === 'draft_note');
   assert.ok(tool?.parameters.required.includes('audience'));

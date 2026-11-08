@@ -10,7 +10,7 @@ function donor(id: string, name: string, gifts: Gift[] = []): Donor {
   return { id, name, gifts, email: 'private@example.org', phone: '3055550100', address: '123 Private Street', language: 'en', records: [] };
 }
 function snapshot(): Snapshot {
-  return { donors: [donor('rosa', 'Rosa Delgado'), donor('maria1', 'María Cruz'), donor('maria2', 'Maria Perez')], matches: [], flags: [], outreach: [], merges: [], sources: [], today: '2026-11-07', demo: true, aiAvailable: false, giftCount: 0, totalCents: 0 };
+  return { donors: [donor('rosa', 'Rosa Delgado'), donor('maria1', 'María Cruz'), donor('maria2', 'Maria Perez')], matches: [], flags: [], outreach: [], merges: [], sources: [], events: [], today: '2026-11-07', demo: true, aiAvailable: false, giftCount: 0, totalCents: 0 };
 }
 function proposals() {
   const actions: Action[] = [];

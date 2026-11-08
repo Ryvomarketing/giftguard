@@ -36,14 +36,14 @@ async function withProvider(mock: typeof fetch, run: () => Promise<void>) {
   try { await run(); } finally { globalThis.fetch = originalFetch; delete process.env.OPENAI_API_KEY; }
 }
 
-test('live session uses bidirectional audio, interruptible VAD, and exactly four safe tools', () => {
+test('live session uses bidirectional audio, interruptible VAD, and exactly five safe tools', () => {
   const session = realtimeSession();
   assert.equal(session.type, 'realtime');
   assert.equal(session.model, 'gpt-realtime-2.1-mini');
   assert.deepEqual(session.output_modalities, ['audio']);
   assert.deepEqual(session.audio.input.turn_detection, { type: 'semantic_vad', eagerness: 'auto', create_response: true, interrupt_response: true });
   assert.equal(session.audio.output.voice, 'marin');
-  assert.deepEqual(session.tools.map(item => item.name), ['get_donor_context', 'open_page', 'draft_note', 'propose_change']);
+  assert.deepEqual(session.tools.map(item => item.name), ['get_donor_context', 'open_page', 'create_event', 'draft_note', 'propose_change']);
   assert.match(session.instructions, /Spoken yes.*never permission/);
   assert.equal('client_secret' in session, false);
   assert.equal('api_key' in session, false);
@@ -152,7 +152,7 @@ test('tool readouts are bounded and exclude donor contact fields and raw rows', 
 
 test('ambiguous names return choices without selecting a donor or changing records', async () => {
   const person = (id: string, name: string): Donor => ({ id, name, email: '', phone: '', address: '', language: 'en', records: [], gifts: [] });
-  const data: Snapshot = { donors: [person('maria1', 'Maria Cruz'), person('maria2', 'María Perez')], matches: [], flags: [], outreach: [], merges: [], sources: [], today: '2026-11-07', demo: true, aiAvailable: false, giftCount: 0, totalCents: 0 };
+  const data: Snapshot = { donors: [person('maria1', 'Maria Cruz'), person('maria2', 'María Perez')], matches: [], flags: [], outreach: [], merges: [], sources: [], events: [], today: '2026-11-07', demo: true, aiAvailable: false, giftCount: 0, totalCents: 0 };
   const result = await runRealtimeTool({ name: 'get_donor_context', arguments: { view: 'donor', query: 'Maria' } }, data);
   assert.equal(result.output.needsClarification, true);
   assert.equal(result.output.count, 2);

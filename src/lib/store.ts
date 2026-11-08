@@ -103,7 +103,7 @@ export function getSnapshot(): Snapshot {
   const undone = new Set(allEvents.filter(e=>e.type==='undo').map(e=>JSON.parse(String(e.data)).mergeId));
   const merges: MergeLog[] = allEvents.filter(e=>e.type==='merge').map(e=>{const d=JSON.parse(String(e.data));return {id:String(e.id),donorId:d.donorId,name:d.name,recordIds:d.recordIds,at:String(e.at),reason:d.reason,undone:undone.has(e.id)};});
   const sources: SourceFreshness[] = (db.prepare('SELECT * FROM imports ORDER BY imported_at DESC').all() as Row[]).filter((r,i,arr)=>arr.findIndex(x=>x.source===r.source)===i).map(r=>({source:r.source as SourceFreshness['source'],file:String(r.file),importedAt:String(r.imported_at),throughDate:String(r.through_date)}));
-  return {donors,matches,flags:[],outreach:projectedOutreach(allRecords,allEvents).map(item=>item.entry),merges,sources,today:today(),demo:process.env.GIFTGUARD_DEMO!=='false',aiAvailable:!!process.env.OPENAI_API_KEY,giftCount:allGifts.length,totalCents:allGifts.reduce((sum,g)=>sum+g.amountCents,0)};
+  return {donors,matches,flags:[],events:[],outreach:projectedOutreach(allRecords,allEvents).map(item=>item.entry),merges,sources,today:today(),demo:process.env.GIFTGUARD_DEMO!=='false',aiAvailable:!!process.env.OPENAI_API_KEY,giftCount:allGifts.length,totalCents:allGifts.reduce((sum,g)=>sum+g.amountCents,0)};
 }
 export const FILE_PREVIEW_LIMIT = 500;
 /** Every upload on record, newest first, with how many gifts each one contributed. */
@@ -269,7 +269,7 @@ export function confirmApproval(id:string):{message:string} {
   });
 }
 function clearTables():void {
-  const db=getStore();for(const table of ['outreach','approvals','events','rejected_pairs','matches','imports','gifts','donor_links','source_records','donors'])db.exec(`DELETE FROM ${table}`);
+  const db=getStore();db.exec('CREATE TABLE IF NOT EXISTS signup_events(id TEXT PRIMARY KEY,code TEXT UNIQUE NOT NULL,name TEXT NOT NULL,host TEXT NOT NULL,date TEXT NOT NULL,created_at TEXT NOT NULL,created_by TEXT NOT NULL);CREATE TABLE IF NOT EXISTS signups(id TEXT PRIMARY KEY,event_id TEXT NOT NULL REFERENCES signup_events(id),name TEXT NOT NULL,email TEXT NOT NULL,phone TEXT NOT NULL,zip TEXT NOT NULL,language TEXT NOT NULL,pledge_cents INTEGER,consent INTEGER NOT NULL,created_at TEXT NOT NULL,match_donor_id TEXT,match_name TEXT,match_reason TEXT,match_confidence TEXT);');for(const table of ['signups','signup_events','outreach','approvals','events','rejected_pairs','matches','imports','gifts','donor_links','source_records','donors'])db.exec(`DELETE FROM ${table}`);
 }
 /** Explicit demo/test helper; never available for live records. */
 export function resetStore():void {if(process.env.GIFTGUARD_DEMO==='false')throw new Error('Reset is only available with sample data.');transaction(()=>{clearTables();bumpVersion();});}

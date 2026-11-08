@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
+import { addSignup, createEvent, listEvents, type SignupInput } from './events';
 import { importRows } from './importer';
 import { getSnapshot } from './store';
-import type { ImportResult, Source } from './types';
+import type { ImportResult, Source, Donor } from './types';
 
 export const DEMO_TODAY = '2026-11-07';
 type DemoRow = Record<string, string | number>;
@@ -80,6 +81,22 @@ export function getDemoFiles(): DemoFile[] {
 }
 
 /** Initial demo loading is idempotent. A reset is an explicitly approved store action. */
+/** One past event with a few guests so the Events page has something to show. Three guests match existing donors; two are new. */
+export function seedDemoEvents(donors: Donor[]): void {
+  if (listEvents().length) return;
+  const event = createEvent({ name: 'Fall Harvest Gala', host: 'Tidepath Family Alliance', date: '2026-10-20' }, DEMO_TODAY, 'staff');
+  const byName = (name: string) => donors.find(donor => donor.name === name);
+  const rosa = byName('Rosa Delgado'), carmen = byName('Carmen Vega');
+  const guests: SignupInput[] = [
+    { name: 'Rosa Delgado', email: rosa?.email || 'rosa.delgado@example.org', phone: '', zip: '', language: 'en', pledgeCents: 25000, consent: true },
+    { name: 'Carmen V.', email: '', phone: carmen?.phone || '2025550002', zip: '', language: 'es', pledgeCents: null, consent: true },
+    { name: 'Miguel Santos', email: '', phone: '', zip: '33130', language: 'es', pledgeCents: 5000, consent: true },
+    { name: 'Priya Natarajan', email: 'priya.natarajan@example.org', phone: '3055550199', zip: '33133', language: 'en', pledgeCents: 10000, consent: true },
+    { name: 'Theo Marchetti', email: 'theo.marchetti@example.org', phone: '', zip: '33156', language: 'en', pledgeCents: null, consent: true },
+  ];
+  for (const guest of guests) addSignup(event.id, guest, donors);
+}
+
 export function seedDemo(): ImportResult[] {
   if (getSnapshot().donors.length > 0) return [];
   return getDemoFiles().map(file => importRows(file.rows, file.name, file.source, createHash('sha256').update(file.csv).digest('hex'), {

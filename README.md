@@ -118,3 +118,17 @@ There are no simulated typing delays, guessed completion percentages or invented
 ### Seeing what was uploaded
 
 Open **Files & sources** on the Start page and click any uploaded source to see its rows as a table, exactly as they were in the spreadsheet (same column names, same values). You can search within the file and switch between uploads of the same source. The view is read-only and shows only rows that were imported; refunds and rows without an amount were never stored.
+
+### Impact line, guided tour, and giving timelines
+
+The Start page opens with the two numbers that matter: regular giving at risk (the yearly value of every open follow-up) and donors counted twice (pending duplicate groups). Both count up from zero when the page loads or when the assistant lands there.
+
+**Show me around** runs a one-minute spoken tour of the workspace. It narrates with the workspace's own numbers, moves through Duplicates, Calls this week and All donors with the same cursor trace the voice assistant uses, and ends by inviting you to ask. **En español** runs the same tour in Spanish. Narration comes from OpenAI's text-to-speech (`gpt-4o-mini-tts`, the same `marin` voice as the live assistant) through `/api/speech`; if the server cannot narrate, the browser's built-in voice reads the captions and the caption says so. The tour only navigates and points. It never saves, merges, sends or approves anything, and clicking any tab or pressing Escape stops it.
+
+Every donor record and every follow-up shows a **giving timeline**: the last 24 months as a row of dots sized by amount, hollow for event or auction purchases, with a dashed ring on the month a regular gift was expected but did not arrive.
+
+### Event sign-up lists
+
+The **Events** tab holds sign-up lists for galas and other events. Create one by hand or by asking the assistant, by voice or by typing: "I have a new gala coming up for the Miami Foundation on November 21, can you make me a sign-up list for that." The assistant builds the name and date from the sentence, creates the list, opens the Events page, and shows the share link, a QR code, and a phone-sized preview of exactly what a guest sees. It asks for the date if none was said; it never invents one.
+
+Each list has a public page at `/signup/<code>` (no sign-in) where a guest leaves their name, email or phone, ZIP, preferred language (English or Spanish), an optional pledge and a consent tick. The page knows only the event's name and date. When a guest signs up, GiftGuard matches them against the donor list by email, phone, or name and ZIP, and shows staff "Likely Rosa Delgado · Same email" or "New" on the Events page, so duplicates are caught at the door instead of cleaned up later. The guest never sees the match. Pledges are recorded as promises, not payments; the next upload reconciles them. Only an empty list can be removed.

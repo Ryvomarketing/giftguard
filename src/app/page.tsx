@@ -1,9 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowRight, ArrowUpRight, Check, Copy, Loader2, Table2, Upload, Undo2, X } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Check, Copy, Loader2, Play, Table2, Upload, Undo2, X } from 'lucide-react';
 import { Assistant, type VoiceControls } from '@/components/assistant';
 import { AgentSpotlight } from '@/components/agent-spotlight';
+import { CountUp } from '@/components/count-up';
+import { GiftTimeline } from '@/components/gift-timeline';
+import { Tour } from '@/components/tour';
+import { SearchReveal } from '@/components/search-reveal';
+import { EventsPanel } from '@/components/events-panel';
+import { impactSummary, tourSteps, type TourLanguage, type TourStep } from '@/lib/showcase';
 import type { AgentActivity } from '@/lib/agent-activity';
 import { HelpTip } from '@/components/help-tip';
 import { Badge } from '@/components/ui/badge';
@@ -17,10 +23,10 @@ import { needsOutreach } from '@/lib/outreach';
 import { buildJourney } from '@/lib/journey';
 import type { DraftFormat } from '@/lib/agents';
 
-type View = 'home' | 'matches' | 'calls' | 'donors';
+type View = 'home' | 'matches' | 'calls' | 'donors' | 'events';
 const sources: Record<Source, string> = { online: 'Online donations', event: 'Event tickets', auction: 'Gala auction', check: 'Mailed checks' };
 const sampleFiles: Record<Source, string> = { online: 'online-donations', event: 'event-tickets', auction: 'gala-auction', check: 'mailed-checks' };
-const navigation: { id: View; label: string }[] = [{ id: 'home', label: 'Start' }, { id: 'matches', label: 'Duplicates' }, { id: 'calls', label: 'Calls this week' }, { id: 'donors', label: 'All donors' }];
+const navigation: { id: View; label: string }[] = [{ id: 'home', label: 'Start' }, { id: 'matches', label: 'Duplicates' }, { id: 'calls', label: 'Calls this week' }, { id: 'donors', label: 'All donors' }, { id: 'events', label: 'Events' }];
 const money = (cents: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: cents % 100 ? 2 : 0 }).format(cents / 100);
 const date = (value: string) => value ? new Date(value.length === 10 ? `${value}T12:00:00` : value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Not recorded';
 
@@ -35,7 +41,20 @@ async function request<T>(url: string, body?: unknown): Promise<T> {
 export default function Home() {
   const voiceControls = useRef<VoiceControls | null>(null);
   const [liveVoiceActive, setLiveVoiceActive] = useState(false);
+  const [tour, setTour] = useState<{ steps: TourStep[]; language: TourLanguage } | null>(null);
+  const tourActive = tour !== null;
   const [agentActivity, setAgentActivity] = useState<AgentActivity | null>(null);
+  // The tab the assistant just opened; highlighted briefly so the eye follows the agent's move.
+  const [agentLanded, setAgentLanded] = useState<View | null>(null);
+  const landedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function markLanded(next: View) {
+    setAgentLanded(null);
+    if (landedTimer.current) clearTimeout(landedTimer.current);
+    // Restart the animation even when the same tab is opened twice in a row.
+    requestAnimationFrame(() => setAgentLanded(next));
+    landedTimer.current = setTimeout(() => setAgentLanded(null), 3600);
+  }
+  useEffect(() => () => { if (landedTimer.current) clearTimeout(landedTimer.current); }, []);
   const [showAgentActivity, setShowAgentActivity] = useState(true);
   const [data, setData] = useState<Snapshot | null>(null);
   const [view, setView] = useState<View>('home');
@@ -53,6 +72,8 @@ export default function Home() {
   const [columnChoices, setColumnChoices] = useState<Record<string, Record<string, string>>>({});
   const [sourceChoices, setSourceChoices] = useState<Record<string, Source>>({});
   const [donorFilter, setDonorFilter] = useState<string[] | null>(null);
+  const [answer, setAnswer] = useState<CommandResult['answer'] | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<string | null>(null);
   const [showLater, setShowLater] = useState(false);
   const [deferredThisVisit, setDeferredThisVisit] = useState<string[]>([]);
   const [mergeProof, setMergeProof] = useState<{ donorId: string; name: string; transactions: number } | null>(null);
@@ -132,7 +153,15 @@ export default function Home() {
     };
     document.addEventListener('keydown', handle); return () => document.removeEventListener('keydown', handle);
   }, [match, view, approval, selectedDonor, busy, propose, reviewEmail, reviewAddress]);
-  function navigate(next: View, fromAgent = false) { if (!fromAgent) setAgentActivity(null); setDonorFilter(null); setView(next); setQuery(''); setReviewEmail(''); setReviewAddress(''); }
+  // The Events page is used live at a check-in table, so it refreshes itself while open.
+  useEffect(() => {
+    if (view !== 'events' || !data) return;
+    void refresh();
+    const timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh(); }, 8000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+  function navigate(next: View, fromAgent = false) { if (!fromAgent) { setAgentActivity(null); setAgentLanded(null); setTour(null); } else markLanded(next); setDonorFilter(null); setAnswer(null); setView(next); setQuery(''); setReviewEmail(''); setReviewAddress(''); }
   async function confirm() {
     if (!approval) return;
     const action = approval.action;
@@ -207,7 +236,8 @@ export default function Home() {
       return;
     }
     if (response.view) { if (!response.donorId) setSelectedDonor(null); navigate(response.view, true); }
-    if (response.donorIds) { setView('donors'); setQuery(''); setDonorFilter(response.donorIds); }
+    if (response.donorIds) { setView('donors'); setQuery(''); setDonorFilter(response.donorIds); setAnswer(response.answer ?? null); markLanded('donors'); }
+    if (response.eventId) { setSelectedEvent(response.eventId); void refresh(); }
     if (response.donorId) setSelectedDonor(response.donorId);
     if (response.approval) setApproval(current => current ?? response.approval!);
   }
@@ -230,6 +260,15 @@ export default function Home() {
   if (!data) return <main className="loading-page"><span className="wordmark">GiftGuard.</span><p role="status">{error || 'Opening your workspace…'}</p>{error ? <Button onClick={() => void refresh().catch(e => setError(e.message))}>Try again</Button> : <Loader2 size={20} className="loading-spinner" aria-hidden="true" />}</main>;
 
   const journey = buildJourney(data);
+  const impact = impactSummary(data);
+  function startTour(language: TourLanguage = 'en') {
+    if (!data) return;
+    if (liveVoiceActive) voiceControls.current?.end();
+    setSelectedDonor(null); setApproval(null); setError('');
+    // The script is fixed when the tour starts so re-renders never restart it.
+    setTour({ steps: tourSteps({ ...data, sourceCount: journey.sourceCount }, language), language });
+  }
+  function endTour() { setTour(null); setAgentActivity(null); }
   const missingSources = journey.missingSources;
   /** Shows an upload back as a table. Read-only: it never changes what was imported. */
   async function openFile(source: Source, name?: string) {
@@ -292,7 +331,7 @@ export default function Home() {
             {navigation.map(item => {
               const count = item.id === 'matches' ? journey.duplicateCount : item.id === 'calls' ? journey.callCount : 0;
               const countLabel = item.id === 'matches' ? `${count} unresolved duplicate groups` : `${count} donors need follow-up`;
-              return <button data-agent-target={`nav-${item.id}`} key={item.id} onClick={() => navigate(item.id)} aria-current={view === item.id ? 'page' : undefined} aria-label={count > 0 ? `${item.label}, ${countLabel}` : item.label}>{item.label}{count > 0 && <span className="nav-count" aria-hidden="true">{count}</span>}</button>;
+              return <button data-agent-target={`nav-${item.id}`} data-agent-landed={agentLanded === item.id ? 'true' : undefined} key={item.id} onClick={() => navigate(item.id)} aria-current={view === item.id ? 'page' : undefined} aria-label={count > 0 ? `${item.label}, ${countLabel}` : item.label}>{item.label}{count > 0 && <span className="nav-count" aria-hidden="true">{count}</span>}</button>;
             })}
           </nav>
           {undoAction && <Button variant="ghost" size="sm" className="header-undo" disabled={busy} onClick={() => void propose(undoAction)}><Undo2 size={14} />Undo</Button>}
@@ -306,14 +345,25 @@ export default function Home() {
           </div>
           <div className="page-heading">
             {view !== 'home' && <Button variant="ghost" size="sm" className="back-to-start" onClick={() => navigate('home')}>← Back to Start</Button>}
-            <h1>{view === 'home' ? 'Your weekly review' : view === 'matches' ? 'Review duplicates' : view === 'calls' ? 'Calls this week' : 'All donors'}</h1>
+            <h1 data-agent-landed={agentLanded === view ? 'true' : undefined}>{view === 'home' ? 'Your weekly review' : view === 'matches' ? 'Review duplicates' : view === 'calls' ? 'Calls this week' : view === 'events' ? 'Events' : 'All donors'}</h1>
+            {view === 'home' && <div className="impact-line">
+              <p aria-label="This week's impact" data-agent-target="impact-summary">{impact.atRiskDonors || impact.duplicateGroups ? <>
+                <strong><CountUp value={impact.atRiskCents} format={cents => money(cents - cents % 100)} replayKey={agentLanded === 'home' ? 'landed' : null} /></strong> in regular giving at risk
+                <span className="impact-sep" aria-hidden="true">·</span>
+                <strong><CountUp value={impact.duplicateGroups} format={count => count.toLocaleString()} replayKey={agentLanded === 'home' ? 'landed' : null} /></strong> {impact.duplicateGroups === 1 ? 'donor' : 'donors'} counted twice
+              </> : <>Nothing at risk this week, and every donor is counted once.</>}</p>
+              <div className="tour-buttons">
+                <Button variant="outline" size="sm" className="tour-button" onClick={() => startTour('en')} disabled={tourActive} aria-label="Show me around: a one-minute spoken tour"><Play size={13} />{tourActive ? 'Tour running…' : 'Show me around'}<span className="tour-length">1 min</span></Button>
+                <Button variant="ghost" size="sm" className="tour-button-alt" lang="es" onClick={() => startTour('es')} disabled={tourActive} aria-label="Recorrido en español: un minuto, hablado">En español</Button>
+              </div>
+            </div>}
             {view === 'home' && <p className="overview-line" data-agent-target="overview-summary" aria-label="Workspace summary">
               <span>{journey.sourceCount} of 4 sources</span>
               <span>{data.giftCount.toLocaleString()} transactions</span>
               <span>{journey.duplicateCount ? <><strong>{journey.duplicateCount}</strong> duplicate {journey.duplicateCount === 1 ? 'group' : 'groups'} waiting</> : 'No duplicates waiting'}</span>
               <span>{journey.callCount ? <><strong>{journey.callCount}</strong> {journey.callCount === 1 ? 'donor' : 'donors'} to contact</> : 'No follow-ups waiting'}</span>
             </p>}
-            {view !== 'home' && <p>{view === 'matches' ? 'Compare the names and contact details. Combine if they match, choose Different people if they don’t, or save the group for Later.' : view === 'calls' ? 'Check the reason, contact the donor, then record what happened.' : 'Your reference directory. Open a donor to see their contact details and full giving history.'}</p>}
+            {view !== 'home' && <p>{view === 'matches' ? 'Compare the names and contact details. Combine if they match, choose Different people if they don’t, or save the group for Later.' : view === 'calls' ? 'Check the reason, contact the donor, then record what happened.' : view === 'events' ? 'Sign-up lists for galas and other events. Share the link or QR code; guests see only the form, and GiftGuard tells you who is already a donor.' : 'Your reference directory. Open a donor to see their contact details and full giving history.'}</p>}
           </div>
 
           {error && !approval && <div className="feedback error" role="alert"><p>{error}</p><Button variant="ghost" size="icon-sm" aria-label="Dismiss error" onClick={() => setError('')}><X size={16} /></Button></div>}
@@ -380,8 +430,7 @@ export default function Home() {
             <div className="section-toolbar"><span><strong>{journey.duplicateCount} groups left</strong> · {journey.pendingDuplicates} new · {journey.savedDuplicates} saved</span>{journey.savedDuplicates > 0 && <label className="check-label"><input type="checkbox" checked={showLater} onChange={e => { setShowLater(e.target.checked); setDeferredThisVisit([]); }} />Include saved for later</label>}<HelpTip label="review shortcuts">With focus in the review, press A to combine, N for different people, or S for later. Every choice still asks you to confirm.</HelpTip></div>
             {mergeProof && <div className="merge-proof" role="status"><div><strong>One donor. Every transaction kept.</strong><p>{mergeProof.transactions} original transactions are safely kept in {mergeProof.name}’s history.</p></div><Button variant="outline" size="sm" onClick={() => setSelectedDonor(mergeProof.donorId)}>View {mergeProof.name}’s history<ArrowUpRight size={14} /></Button></div>}
             {match ? <>
-              <div className="review-heading"><h2>Are these the same person?</h2><Badge variant="outline">{match.confidence} confidence</Badge><HelpTip label="match confidence">Confidence is a suggestion based on the matching fields. Shared household details do not always mean the same person.</HelpTip></div>
-              <p className="match-reason">{match.reason}</p>
+              <div className="review-heading"><h2>Are these the same person?</h2><Badge variant="outline">{match.confidence} confidence</Badge><HelpTip label="why these matched"><strong>Why these matched:</strong> {match.reason}<br /><br />Confidence is a suggestion based on the matching fields. Shared household details do not always mean the same person.</HelpTip></div>
               <div data-agent-target="match-records" className="records-grid">{matchRecords.map(record => <article className="record" key={record.id}>
                 <span className="record-source">{sources[record.source]}</span><h3>{record.name}</h3>
                 <dl><dt>Email</dt><dd>{record.email || 'Not recorded'}</dd><dt>Phone</dt><dd className={record.phone && matchRecords.filter(r => r.phone === record.phone).length > 1 ? 'matching-field' : ''}>{record.phone || 'Not recorded'}</dd><dt>Address</dt><dd className={record.address && matchRecords.filter(r => r.address === record.address).length > 1 ? 'matching-field' : ''}>{record.address || 'Not recorded'}</dd></dl>
@@ -394,8 +443,11 @@ export default function Home() {
           </section>}
 
           {view === 'calls' && <>
-            <div className="section-toolbar"><Input className="search-input" value={query} onChange={e => setQuery(e.target.value)} placeholder="Find a donor" aria-label="Search follow-up list" /><label className="check-label"><input type="checkbox" checked={showDone} onChange={e => setShowDone(e.target.checked)} />Include contacted</label></div>
-            <p className="records-notice">Check your latest files before reaching out. A missing gift does not confirm a failed payment.</p>
+            <div className="section-toolbar calls-toolbar">
+              <SearchReveal value={query} onChange={setQuery} placeholder="Find a donor" label="Search follow-up list" />
+              <HelpTip label="this list">Check your latest files before reaching out. A missing gift does not confirm a failed payment.</HelpTip>
+              <label className="check-label"><input type="checkbox" checked={showDone} onChange={e => setShowDone(e.target.checked)} />Include contacted</label>
+            </div>
             {flags.length ? <div className="follow-up-layout">
               <div data-agent-target="follow-up-list" className="follow-up-list" aria-label="Donors to contact">{flags.map(flag => {
                 const contact = data.outreach.find(item => item.donorId === flag.donorId);
@@ -404,22 +456,32 @@ export default function Home() {
               {call && <article data-agent-target="follow-up-detail" className="follow-up-detail">
                 <div className="call-step-label">1 · Check why they’re here</div><div className="donor-heading"><div><h2>{call.name}</h2><p>{call.reason}</p></div><Button variant="ghost" size="icon-sm" aria-label={`Open ${call.name}'s history`} onClick={() => setSelectedDonor(call.donorId)}><ArrowUpRight size={18} /></Button></div>
                 <dl className="gift-facts"><div><dt>Last gift</dt><dd>{money(call.lastAmountCents)}<span>{date(call.lastGiftDate)}</span></dd></div><div><dt>Usual gift</dt><dd>{money(call.usualAmountCents)}<span>{call.pattern === 'annual' ? 'Yearly' : call.pattern === 'quarterly' ? 'Every three months' : 'Monthly'}</span></dd></div><div><dt>Expected</dt><dd>{date(call.expectedDate)}<span>{call.daysLate} days ago</span></dd></div></dl>
-                <div className="call-step-label">2 · Contact the donor</div><div className="donor-contact-options"><span>{callDonor?.phone ? <a href={`tel:${callDonor.phone}`}>{callDonor.phone}</a> : 'No phone recorded'}</span><span>{callDonor?.email ? <a href={`mailto:${callDonor.email}`}>{callDonor.email}</a> : 'No email recorded'}</span></div><p className="contact-instruction">Use the note below for your call or email. GiftGuard does not send it.</p><div className="note-heading"><h3>Your draft</h3><Badge variant="secondary">{draftModes[call.donorId] === 'ai' ? 'AI draft' : 'Sample draft'}</Badge><HelpTip label="draft facts">Review before sending. Based on giving since {call.firstGiftYear}, a usual {call.pattern} gift of {money(call.usualAmountCents)}{call.program ? `, and ${call.program}` : ''}. Estimated yearly giving: {money(call.annualValueCents)}. This is a past pattern, not promised income.</HelpTip></div>
+                {callDonor && <GiftTimeline compact gifts={callDonor.gifts} today={data.today} flag={call} />}
+                <div className="call-step-label">2 · Contact the donor<HelpTip label="contacting the donor">Use the note below for your call or email. GiftGuard does not send it.</HelpTip></div><div className="donor-contact-options"><span>{callDonor?.phone ? <a href={`tel:${callDonor.phone}`}>{callDonor.phone}</a> : 'No phone recorded'}</span><span>{callDonor?.email ? <a href={`mailto:${callDonor.email}`}>{callDonor.email}</a> : 'No email recorded'}</span></div><div className="note-heading"><h3>Your draft</h3><Badge variant="secondary">{draftModes[call.donorId] === 'ai' ? 'AI draft' : 'Sample draft'}</Badge><HelpTip label="draft facts">Review before sending. Based on giving since {call.firstGiftYear}, a usual {call.pattern} gift of {money(call.usualAmountCents)}{call.program ? `, and ${call.program}` : ''}. Estimated yearly giving: {money(call.annualValueCents)}. This is a past pattern, not promised income.</HelpTip></div>
                 <Textarea data-agent-target={`draft:${call.donorId}`} className="note-editor" value={drafts[call.donorId] ?? fallbackNote(call)} onChange={e => setDrafts(old => ({ ...old, [call.donorId]: e.target.value }))} aria-label={`Editable note for ${call.name}`} />
                 <div className="note-controls"><Button variant="outline" size="sm" onClick={() => void copyNote(drafts[call.donorId] ?? fallbackNote(call))}><Copy size={14} />Copy note</Button><details className="draft-options"><summary>Rewrite options</summary><div><label>Format<select value={formatChoices[call.donorId] ?? 'note'} onChange={e => setFormatChoices(previous => ({ ...previous, [call.donorId]: e.target.value as DraftFormat }))}><option value="note">Short note</option><option value="email">Email</option><option value="text_message">Text message</option><option value="call_script">Call script</option></select></label><label>Language<select value={language} onChange={e => setLanguageOverrides(previous => ({ ...previous, [call.donorId]: e.target.value as 'en' | 'es' }))}><option value="en">English</option><option value="es">Español</option></select></label><label className="check-label"><input type="checkbox" checked={giveMiami} onChange={e => setGiveMiami(e.target.checked)} />Mention Give Miami Day</label><Button variant="outline" size="sm" disabled={noteBusy} onClick={() => void getNote(call)}>{noteBusy ? 'Writing…' : 'Rewrite note'}</Button></div></details></div>
-                <div className="outreach-section"><div className="call-step-label">3 · Record what happened</div><p className="outcome-instruction">After you reach out, choose an outcome. Or snooze this donor for two weeks.</p><Input placeholder="Quick result (optional)" aria-label="Outreach result" value={resultNote} onChange={e => setOutreachInput({ donorId: call.donorId, status: contactStatus, result: e.target.value })} /><div className="outreach-actions"><label className="sr-only" htmlFor="outreach-status">Follow-up outcome</label><select id="outreach-status" value={contactStatus} onChange={e => setOutreachInput({ donorId: call.donorId, status: e.target.value as ContactStatus | '', result: resultNote })}><option value="" disabled>Choose an outcome</option>{(['Called', 'Emailed', 'Left message', 'Snoozed'] as ContactStatus[]).map(status => <option key={status} value={status}>{status === 'Snoozed' ? 'Snooze for 2 weeks' : status}</option>)}</select><Button disabled={busy || !contactStatus} onClick={() => { if (contactStatus) void propose({ type: 'contact', donorId: call.donorId, status: contactStatus, result: resultNote }); }}>{contactStatus === 'Snoozed' ? 'Snooze 2 weeks' : 'Save follow-up'}</Button></div>{data.outreach.some(item => item.donorId === call.donorId) && <Button variant="ghost" size="sm" onClick={() => void propose({ type: 'undoContact', donorId: call.donorId })}><Undo2 size={14} />Undo last follow-up</Button>}</div>
+                <div className="outreach-section"><div className="call-step-label">3 · Record what happened<HelpTip label="recording the outcome">After you reach out, choose an outcome. Or snooze this donor for two weeks.</HelpTip></div><Input placeholder="Quick result (optional)" aria-label="Outreach result" value={resultNote} onChange={e => setOutreachInput({ donorId: call.donorId, status: contactStatus, result: e.target.value })} /><div className="outreach-actions"><label className="sr-only" htmlFor="outreach-status">Follow-up outcome</label><select id="outreach-status" value={contactStatus} onChange={e => setOutreachInput({ donorId: call.donorId, status: e.target.value as ContactStatus | '', result: resultNote })}><option value="" disabled>Choose an outcome</option>{(['Called', 'Emailed', 'Left message', 'Snoozed'] as ContactStatus[]).map(status => <option key={status} value={status}>{status === 'Snoozed' ? 'Snooze for 2 weeks' : status}</option>)}</select><Button disabled={busy || !contactStatus} onClick={() => { if (contactStatus) void propose({ type: 'contact', donorId: call.donorId, status: contactStatus, result: resultNote }); }}>{contactStatus === 'Snoozed' ? 'Snooze 2 weeks' : 'Save follow-up'}</Button></div>{data.outreach.some(item => item.donorId === call.donorId) && <Button variant="ghost" size="sm" onClick={() => void propose({ type: 'undoContact', donorId: call.donorId })}><Undo2 size={14} />Undo last follow-up</Button>}</div>
               </article>}
             </div> : <div className="empty-state"><h2>{query ? 'No donors match this search.' : 'No calls left for now.'}</h2><p>{query ? 'Clear the search to return to your list.' : 'Your current follow-ups are complete or snoozed. Add fresh exports next week to check again.'}</p><div className="empty-actions">{query ? <Button variant="outline" onClick={() => setQuery('')}>Clear search</Button> : <><Button onClick={() => navigate('home')}>Back to Start</Button>{journey.savedDuplicates > 0 && <Button variant="outline" onClick={reviewSaved}>Review {journey.savedDuplicates} saved groups</Button>}</>}</div></div>}
           </>}
 
           {view === 'donors' && <>
-            <div className="section-toolbar"><Input className="search-input" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search name, email, or phone" aria-label="Search donors" /><span>{shownDonors.length} donor{shownDonors.length === 1 ? '' : 's'}</span>{donorFilter && <Button variant="ghost" size="sm" onClick={() => setDonorFilter(null)}>Show everyone</Button>}</div>
+            {donorFilter && answer && <div className="answer-bar" data-agent-target="answer-bar" role="status" aria-live="polite">
+              <div className="answer-text"><span className="answer-label">{answer.label}</span><strong>{answer.count.toLocaleString()} {answer.count === 1 ? 'donor' : 'donors'}{answer.totalCents !== null && <> · {money(answer.totalCents)}</>}</strong></div>
+              <Button variant="outline" size="sm" onClick={() => { setDonorFilter(null); setAnswer(null); }}>Show everyone</Button>
+            </div>}
+            <div className="section-toolbar"><SearchReveal value={query} onChange={setQuery} placeholder="Search name, email, or phone" label="Search donors" /><span>{shownDonors.length} donor{shownDonors.length === 1 ? '' : 's'}</span>{donorFilter && !answer && <Button variant="ghost" size="sm" onClick={() => setDonorFilter(null)}>Show everyone</Button>}</div>
             {shownDonors.length ? <div data-agent-target="donor-list" className="donors-table"><div className="donor-table-heading"><span>Name</span><span>Gifts</span><span>Total received</span><span /></div>{shownDonors.map(item => <button className="donor-row" key={item.id} onClick={() => setSelectedDonor(item.id)}><span><strong>{item.name}</strong><small>{item.email || 'No email recorded'}</small></span><span>{item.gifts.length}</span><span>{money(item.gifts.reduce((sum, gift) => sum + gift.amountCents, 0))}</span><ArrowUpRight size={15} aria-hidden="true" /></button>)}</div> : <div className="empty-state"><h2>No matching donors.</h2><p>Try a different name or email.</p></div>}
           </>}
 
+          {view === 'events' && <EventsPanel events={data.events} today={data.today} selectedId={selectedEvent} busy={busy} onSelect={setSelectedEvent}
+            onCreate={async input => { setBusy(true); setError(''); try { const created = await request<{ event: { id: string; name: string } }>('/api/events', input); await refresh(); setSelectedEvent(created.event.id); setNotice(`Sign-up list for ${created.event.name} is ready.`); } finally { setBusy(false); } }}
+            onRemove={async id => { setBusy(true); setError(''); try { const response = await fetch(`/api/events?id=${encodeURIComponent(id)}`, { method: 'DELETE' }); const result = await response.json(); if (response.status === 401) window.dispatchEvent(new CustomEvent('giftguard:signed-out')); if (!response.ok) throw new Error(result.error || 'The list could not be removed.'); setSelectedEvent(null); await refresh(); setNotice('The empty sign-up list was removed.'); } catch (e) { setError(e instanceof Error ? e.message : 'The list could not be removed.'); } finally { setBusy(false); } }} />}
+
           <footer className="workspace-footer"><span>GiftGuard / Tidepath</span><HelpTip label="data privacy">Donor records stay in this app’s database. When live AI is enabled, selected fields and voice requests are sent to OpenAI. Nothing is sent to donors automatically.</HelpTip>{undoAction && <Button variant="ghost" size="sm" disabled={busy} onClick={() => void propose(undoAction)}><Undo2 size={14} />Undo last change</Button>}{data.demo && <Button variant="ghost" size="sm" disabled={busy} onClick={() => void propose({ type: 'reset' })}>Reset demo</Button>}</footer>
         </main>
-        <AgentSpotlight activity={agentActivity} enabled={showAgentActivity && liveVoiceActive} />
+        <AgentSpotlight activity={agentActivity} enabled={showAgentActivity && (liveVoiceActive || tourActive)} />
+        {tour && <Tour steps={tour.steps} language={tour.language} onNavigate={view => navigate(view, true)} onActivity={setAgentActivity} onEnd={endTour} />}
         <Assistant onActivity={setAgentActivity} showActivity={showAgentActivity} onShowActivityChange={setShowAgentActivity} voiceControlRef={voiceControls} onLiveChange={setLiveVoiceActive} onResult={onAssistantResult} aiAvailable={data.aiAvailable} suspended={!!approval || !!selectedDonor} approvalPending={!!approval} contextDonorId={selectedDonor || (view === 'calls' ? call?.donorId : undefined)} />
       </div>
 
@@ -440,7 +502,7 @@ export default function Home() {
           {fileView && <>
             <div className="section-toolbar file-toolbar">
               {fileView.files.length > 1 && <label className="file-pick">File<select value={fileView.file?.file || ''} onChange={e => void openFile(fileView.source, e.target.value)} aria-label="Choose which upload to view">{fileView.files.map(item => <option key={item.file} value={item.file}>{item.file} · {item.rows.toLocaleString()} rows</option>)}</select></label>}
-              <Input className="search-input" value={fileQuery} onChange={e => setFileQuery(e.target.value)} placeholder="Find in this file" aria-label="Search the uploaded rows" disabled={!fileView.file} />
+              <SearchReveal value={fileQuery} onChange={setFileQuery} placeholder="Find in this file" label="Search the uploaded rows" disabled={!fileView.file} />
               {fileView.file && <span>{fileRows.length === fileView.file.rows.length ? `${fileView.file.rows.length.toLocaleString()} rows` : `${fileRows.length.toLocaleString()} of ${fileView.file.rows.length.toLocaleString()} rows`}</span>}
             </div>
             {fileView.error && <p className="inline-error" role="alert">{fileView.error}</p>}
@@ -465,6 +527,7 @@ export default function Home() {
             {editContact ? <div className="edit-contact"><label>Email<Input type="email" value={editEmail} onChange={e => setEditEmail(e.target.value)} /></label><label>Address<Input value={editAddress} onChange={e => setEditAddress(e.target.value)} /></label><div className="action-row"><Button variant="outline" onClick={() => setEditContact(false)}>Cancel</Button><Button disabled={busy} onClick={() => void propose({ type: 'editContact', donorId: donor.id, email: editEmail, address: editAddress, language: donor.language })}>Review changes</Button></div></div> : <div className="profile-contact"><div><p>{donor.email || 'No email recorded'}</p>{donor.phone && <p>{donor.phone}</p>}<p>{donor.address || 'No address recorded'}</p></div><Button variant="outline" size="sm" onClick={() => { setEditEmail(donor.email); setEditAddress(donor.address); setEditContact(true); }}>Edit contact</Button></div>}
             {drafts[donor.id] && <section data-agent-target={`draft:${donor.id}`}><div className="note-heading"><h3>Your draft</h3><Badge variant="secondary">{draftModes[donor.id] === 'ai' ? 'AI draft' : 'Sample draft'}</Badge></div><Textarea value={drafts[donor.id]} onChange={e => setDrafts(old => ({ ...old, [donor.id]: e.target.value }))} aria-label={`Draft for ${donor.name}`} className="note-editor mb-3 min-h-40"/><div className="action-row" style={{ justifyContent: 'space-between' }}><span className="secondary-note">Edit it here, then copy it into your email or text. GiftGuard does not send it.</span><Button variant="outline" size="sm" onClick={() => void copyNote(drafts[donor.id])}><Copy size={14} />Copy draft</Button></div></section>}
             <div className="profile-summary"><span><strong>{donor.gifts.length}</strong> gifts</span><span><strong>{money(donor.gifts.reduce((sum, gift) => sum + gift.amountCents, 0))}</strong> received</span><span><strong>{donor.records.length}</strong> source records</span></div>
+            <section><h3>Giving timeline</h3><GiftTimeline gifts={donor.gifts} today={data.today} flag={data.flags.find(flag => flag.donorId === donor.id) ?? null} /></section>
             <section><h3>Giving history</h3><div className="gift-history">{[...donor.gifts].sort((a, b) => b.date.localeCompare(a.date)).map(gift => <div key={gift.id}><span><strong>{date(gift.date)}</strong><small>{sources[gift.source]}{gift.kind === 'purchase' ? ' · Purchase' : ''}{gift.program ? ` · ${gift.program}` : ''}</small></span><strong>{money(gift.amountCents)}</strong></div>)}</div></section>
             <details className="merge-details"><summary>Merge history <span>{relatedMerges.length}</span></summary>{relatedMerges.length ? relatedMerges.map(merge => <div className="merge-history" key={merge.id}><div><strong>{merge.undone ? 'Merge undone' : `${merge.recordIds.length} records combined`}</strong><p>{date(merge.at)} · {merge.reason}</p></div>{!merge.undone && <Button variant="outline" size="sm" disabled={busy} onClick={() => void propose({ type: 'undo', mergeId: merge.id })}><Undo2 size={14} />Undo</Button>}</div>) : <p className="secondary-note">No merges for this donor.</p>}</details>
             <p className="secondary-note">Original records and every gift are preserved.</p>

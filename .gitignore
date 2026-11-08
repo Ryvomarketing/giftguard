@@ -1,0 +1,12 @@
+node_modules/
+.next/
+.env*
+!.env.example
+data/
+*.tsbuildinfo
+.omx/logs/
+.DS_Store
+.omx/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

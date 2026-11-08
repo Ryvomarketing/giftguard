@@ -1,0 +1,63 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { NextRequest } from 'next/server';
+import * as XLSX from 'xlsx';
+import { POST as login } from '../src/app/api/login/route';
+import { GET as state } from '../src/app/api/state/route';
+import { POST as propose } from '../src/app/api/propose/route';
+import { POST as confirm } from '../src/app/api/confirm/route';
+import { POST as upload } from '../src/app/api/import/route';
+import { POST as command } from '../src/app/api/command/route';
+import { POST as note } from '../src/app/api/note/route';
+import type { Snapshot, Approval } from '../src/lib/types';
+const dir=mkdtempSync(join(tmpdir(),'giftguard-api-'));
+process.env.GIFTGUARD_DB=join(dir,'test.sqlite');
+process.env.GIFTGUARD_DEMO='true';
+delete process.env.OPENAI_API_KEY;
+delete process.env.GIFTGUARD_PASSWORD;
+let cookie='';
+function request(path:string,data?:unknown,origin=true){return new NextRequest(`http://localhost:3000/api/${path}`,{method:data===undefined?'GET':'POST',headers:{...(cookie?{cookie}:{}),...(origin?{origin:'http://localhost:3000'}:{}),...(data===undefined?{}:{'content-type':'application/json'})},...(data===undefined?{}:{body:JSON.stringify(data)})});}
+test('protected full workflow conserves gifts and requires exact one-use approvals',async()=>{
+ assert.equal((await state(request('state'))).status,401);
+ assert.equal((await login(request('login',{password:'wrong'}))).status,401);
+ assert.equal((await login(request('login',{password:'giftguard-demo'},false))).status,403);
+ const signed=await login(request('login',{password:'giftguard-demo'}));assert.equal(signed.status,200);cookie=signed.headers.get('set-cookie')!.split(';')[0];
+ const before=await (await state(request('state'))).json() as Snapshot;
+ assert.equal(before.flags.length,9);assert.equal(before.giftCount,899);assert.equal(before.aiAvailable,false);
+ assert.equal((await propose(request('propose',{action:{type:'reset'}},false))).status,403);
+ assert.equal((await confirm(request('confirm',{id:'invented'}))).status,400);
+ const rosa=before.matches.find(m=>m.recordIds.length===3&&/Rosa|Delgado/.test(m.name));assert.ok(rosa);
+ const p=await (await propose(request('propose',{action:{type:'merge',candidateIds:[rosa.id]}}))).json() as Approval;
+ assert.ok(p.items.some(x=>/Delgado/.test(x)));
+ assert.equal((await confirm(request('confirm',{id:p.id}))).status,200);
+ assert.equal((await confirm(request('confirm',{id:p.id}))).status,400);
+ const merged=await (await state(request('state'))).json() as Snapshot;
+ assert.equal(merged.giftCount,before.giftCount);assert.equal(merged.totalCents,before.totalCents);assert.equal(merged.donors.length,before.donors.length-2);
+ const undo=await (await propose(request('propose',{action:{type:'undo',mergeId:merged.merges[0].id}}))).json() as Approval;
+ assert.equal((await confirm(request('confirm',{id:undo.id}))).status,200);
+ const restored=await (await state(request('state'))).json() as Snapshot;
+ assert.equal(restored.donors.length,before.donors.length);assert.equal(restored.totalCents,before.totalCents);
+ const cmd=await (await command(request('command',{message:"Who's late this week?"}))).json();assert.equal(cmd.view,'calls');assert.equal(cmd.mode,'demo');
+ const bulk=await (await command(request('command',{message:'Approve all high-confidence matches'}))).json();assert.ok(bulk.approval);assert.equal((await (await state(request('state'))).json()).donors.length,before.donors.length);
+ const draft=await (await note(request('note',{donorId:before.flags[0].donorId,language:'en'}))).json();assert.ok(draft.note.length>100);assert.equal(draft.mode,'demo');
+});
+test('Excel import, replay protection and unfamiliar columns',async()=>{
+ const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,XLSX.utils.json_to_sheet([{Name:'Test Donor',Email:'test@example.test',Amount:42.50,Date:'2026-11-06','Transaction ID':'api-xlsx-1'}]),'Gifts');
+ const bytes=XLSX.write(book,{bookType:'xlsx',type:'buffer'});
+ async function send(file:File){const form=new FormData();form.append('files',file);return upload(new NextRequest('http://localhost:3000/api/import',{method:'POST',headers:{cookie,origin:'http://localhost:3000'},body:form}));}
+ const first=await (await send(new File([bytes],'online.xlsx'))).json();assert.equal(first.imported,1);
+ const second=await (await send(new File([bytes],'online.xlsx'))).json();assert.equal(second.imported,0);assert.equal(second.skipped,1);
+ const missing=await (await send(new File(['Who,How much,When\nMystery,25,2026-11-06'],'unknown.csv',{type:'text/csv'}))).json();assert.ok(missing.needsMapping.length);assert.equal(missing.imported,0);
+});
+test('unknown file source and column choices are resolved without editing the spreadsheet',async()=>{
+ const file=new File(['Who,How much,When\nNew Person,31.25,2026-11-06'],'november.csv',{type:'text/csv'});
+ const form=new FormData();form.append('files',file);form.set('mapping',JSON.stringify({'november.csv':{name:'Who',amount:'How much',date:'When'}}));
+ const req=()=>new NextRequest('http://localhost:3000/api/import',{method:'POST',headers:{cookie,origin:'http://localhost:3000'},body:form});
+ const pending=await (await upload(req())).json();assert.equal(pending.imported,0);assert.equal(pending.needsSource[0].file,'november.csv');
+ form.set('sources',JSON.stringify({'november.csv':'check'}));
+ const done=await (await upload(req())).json();assert.equal(done.imported,1);assert.equal(done.needsSource.length,0);
+});
+test.after(()=>rmSync(dir,{recursive:true,force:true}));
